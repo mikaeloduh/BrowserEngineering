@@ -1,14 +1,24 @@
 import socket
+import ssl
 
 class URL:
     def __init__(self, url):
         self.scheme, url = url.split("://", 1)
-        assert self.scheme == "http"
+        assert self.scheme in ["http", "https"]
+
+        if self.scheme == "http":
+            self.port = 80
+        else:
+            self.port = 443
 
         if "/" not in url:
             url = url + "/"
         self.host, url = url.split("/", 1)
         self.path = "/" + url
+        
+        if ":" in self.host:
+            self.host, port = self.host.split(":", 1)
+            self.port = int(port)
 
     def request(self):
         s = socket.socket(
@@ -16,7 +26,16 @@ class URL:
             type=socket.SOCK_STREAM,  # Use stream sockets
             proto=socket.IPPROTO_TCP,  # Use TCP protocol for the socket
         )
-        s.connect((self.host, 80))
+        # First establish TCP connection
+        s.connect((self.host, self.port))
+        
+        # Then upgrade to SSL/TLS if needed
+        if self.scheme == "https":
+            ctx = ssl.create_default_context()
+            s = ctx.wrap_socket(s, server_hostname=self.host)
+        # This order is important because the SSL/TLS handshake needs to 
+        # happen over an already established TCP connection. The SSL/TLS 
+        # protocol is built on top of TCP.
 
         request = f"GET {self.path} HTTP/1.0\r\n"
         request += f"Host: {self.host}\r\n"
