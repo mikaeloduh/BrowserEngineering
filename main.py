@@ -3,6 +3,12 @@ import ssl
 
 class URL:
     def __init__(self, url):
+        # Handle view-source scheme
+        self.view_source = False
+        if url.startswith("view-source:"):
+            self.view_source = True
+            url = url[12:]  # Remove "view-source:" prefix
+            
         # Handle data URLs which use single colon instead of ://
         if url.startswith("data:"):
             self.scheme = "data"
@@ -38,108 +44,116 @@ class URL:
             self.port = int(port)
 
     def request(self):
+        # Get the content first
         if self.scheme == "file":
             try:
                 with open(self.path, "r") as f:
-                    return f.read()
+                    content = f.read()
             except FileNotFoundError:
-                return f"Error: File not found: {self.path}"
+                content = f"Error: File not found: {self.path}"
             except PermissionError:
-                return f"Error: Permission denied: {self.path}"
+                content = f"Error: Permission denied: {self.path}"
+        elif self.scheme == "data":
+            content = self.data
+        else:
+            s = socket.socket(
+                family=socket.AF_INET,  # Use IPv4
+                type=socket.SOCK_STREAM,  # Use stream sockets
+                proto=socket.IPPROTO_TCP,  # Use TCP protocol for the socket
+            )
+            # First establish TCP connection
+            s.connect((self.host, self.port))
+            
+            # Then upgrade to SSL/TLS if needed
+            if self.scheme == "https":
+                ctx = ssl.create_default_context()
+                s = ctx.wrap_socket(s, server_hostname=self.host)
+            # This order is important because the SSL/TLS handshake needs to 
+            # happen over an already established TCP connection. The SSL/TLS 
+            # protocol is built on top of TCP.
 
-        if self.scheme == "data":
-            return self.data
+            # Create headers dictionary for easier management
+            headers = {
+                "Host": self.host,
+                "Connection": "close",
+                "User-Agent": "toy-browser/1.0",
+            }
 
-        s = socket.socket(
-            family=socket.AF_INET,  # Use IPv4
-            type=socket.SOCK_STREAM,  # Use stream sockets
-            proto=socket.IPPROTO_TCP,  # Use TCP protocol for the socket
-        )
-        # First establish TCP connection
-        s.connect((self.host, self.port))
-        
-        # Then upgrade to SSL/TLS if needed
-        if self.scheme == "https":
-            ctx = ssl.create_default_context()
-            s = ctx.wrap_socket(s, server_hostname=self.host)
-        # This order is important because the SSL/TLS handshake needs to 
-        # happen over an already established TCP connection. The SSL/TLS 
-        # protocol is built on top of TCP.
+            # Build request with headers
+            request = f"GET {self.path} HTTP/1.1\r\n"  # Updated to HTTP/1.1
+            for header, value in headers.items():
+                request += f"{header}: {value}\r\n"
+            request += "\r\n"
 
-        # Create headers dictionary for easier management
-        headers = {
-            "Host": self.host,
-            "Connection": "close",
-            "User-Agent": "toy-browser/1.0",
-        }
+            # Send the request to the server, encoded as a byte string
+            s.send(request.encode("utf-8"))
 
-        # Build request with headers
-        request = f"GET {self.path} HTTP/1.1\r\n"  # Updated to HTTP/1.1
-        for header, value in headers.items():
-            request += f"{header}: {value}\r\n"
-        request += "\r\n"
+            # To read the server’s response, you could use the read function on sockets, 
+            # which gives whatever bits of the response have already arrived. Then you 
+            # write a loop to collect those bits as they arrive. However, in Python you
+            # can use the makefile helper function, which hides the loop
+            response = s.makefile("r", encoding="utf-8", newline="\r\n")
+            statusline = response.readline()
+            version, status, explanation = statusline.split(" ", 2)
 
-        # Send the request to the server, encoded as a byte string
-        s.send(request.encode("utf-8"))
+            # Read the response headers
+            response_headers = {}
+            while True:
+                line = response.readline()
+                # If the line is empty, we've reached the end of the headers
+                if line == "\r\n":
+                    break
+                header, value = line.split(":", 1)
+                response_headers[header.casefold()] = value.strip()
 
-        # To read the server’s response, you could use the read function on sockets, 
-        # which gives whatever bits of the response have already arrived. Then you 
-        # write a loop to collect those bits as they arrive. However, in Python you
-        # can use the makefile helper function, which hides the loop
-        response = s.makefile("r", encoding="utf-8", newline="\r\n")
-        statusline = response.readline()
-        version, status, explanation = statusline.split(" ", 2)
+                assert "transfer-encoding" not in response_headers
+                assert "content-encoding" not in response_headers
 
-        # Read the response headers
-        response_headers = {}
-        while True:
-            line = response.readline()
-            # If the line is empty, we've reached the end of the headers
-            if line == "\r\n":
-                break
-            header, value = line.split(":", 1)
-            response_headers[header.casefold()] = value.strip()
+            # Read the response body
+            content = response.read()
+            s.close()
 
-            assert "transfer-encoding" not in response_headers
-            assert "content-encoding" not in response_headers
-
-        # Read the response body
-        content = response.read()
-        s.close()
-
-        return content
-
-        
-def show(body):
-    # Print the body without HTML tags, handling HTML entities
-    in_tag = False
-    entity = ""
-    in_entity = False
+        # If view-source is enabled, return the raw content
+        if self.view_source:
+            return content
+            
+        # Otherwise, return for normal rendering
+        return self.render(content)
     
-    for c in body:
-        if in_entity:
-            if c == ";":
-                # Convert and print the entity
-                if entity == "&lt":
-                    print("<", end="")
-                elif entity == "&gt":
-                    print(">", end="")
-                in_entity = False
-                entity = ""
-            else:
-                entity += c
-        elif c == "&":
-            in_entity = True
-            entity = "&"
-        elif c == "<":
-            in_tag = True
-        elif c == ">":
-            in_tag = False
-        elif not in_tag:
-            print(c, end="")
+    def render(self, content):
+        # Move HTML parsing logic here
+        result = ""
+        in_tag = False
+        entity = ""
+        in_entity = False
+        
+        for c in content:
+            if in_entity:
+                if c == ";":
+                    if entity == "&lt":
+                        result += "<"
+                    elif entity == "&gt":
+                        result += ">"
+                    in_entity = False
+                    entity = ""
+                else:
+                    entity += c
+            elif c == "&":
+                in_entity = True
+                entity = "&"
+            elif c == "<":
+                in_tag = True
+            elif c == ">":
+                in_tag = False
+            elif not in_tag:
+                result += c
+        return result
+
+def show(body):
+    print(body, end="")
 
 def load(url):
-    body = URL(url).request()
+    body = url.request()
     show(body)
 
 
@@ -148,7 +162,7 @@ def main():
     # Default to opening the test.html file in the same directory
     default_url = "file://test.html"
     url = sys.argv[1] if len(sys.argv) > 1 else default_url
-    load(url)
+    load(URL(url))
 
 if __name__ == "__main__":
     main()
