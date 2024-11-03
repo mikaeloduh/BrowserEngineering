@@ -4,7 +4,12 @@ import ssl
 class URL:
     def __init__(self, url):
         self.scheme, url = url.split("://", 1)
-        assert self.scheme in ["http", "https"]
+        assert self.scheme in ["http", "https", "file"]
+
+        if self.scheme == "file":
+            self.host = ""
+            self.path = url
+            return
 
         if self.scheme == "http":
             self.port = 80
@@ -21,6 +26,15 @@ class URL:
             self.port = int(port)
 
     def request(self):
+        if self.scheme == "file":
+            try:
+                with open(self.path, "r") as f:
+                    return f.read()
+            except FileNotFoundError:
+                return f"Error: File not found: {self.path}"
+            except PermissionError:
+                return f"Error: Permission denied: {self.path}"
+
         s = socket.socket(
             family=socket.AF_INET,  # Use IPv4
             type=socket.SOCK_STREAM,  # Use stream sockets
@@ -99,7 +113,10 @@ def load(url):
 
 def main():
     import sys
-    load(sys.argv[1])
+    # Default to opening the test.html file in the same directory
+    default_url = "file://test.html"
+    url = sys.argv[1] if len(sys.argv) > 1 else default_url
+    load(url)
 
 if __name__ == "__main__":
     main()
