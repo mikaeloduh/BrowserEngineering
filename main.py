@@ -3,6 +3,14 @@ import ssl
 
 class URL:
     def __init__(self, url):
+        # Handle data URLs which use single colon instead of ://
+        if url.startswith("data:"):
+            self.scheme = "data"
+            self.data = url[5:]  # Everything after "data:"
+            self.host = ""
+            self.path = ""
+            return
+
         self.scheme, url = url.split("://", 1)
         assert self.scheme in ["http", "https", "file"]
 
@@ -34,6 +42,9 @@ class URL:
                 return f"Error: File not found: {self.path}"
             except PermissionError:
                 return f"Error: Permission denied: {self.path}"
+
+        if self.scheme == "data":
+            return self.data
 
         s = socket.socket(
             family=socket.AF_INET,  # Use IPv4
