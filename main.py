@@ -14,21 +14,25 @@ class URL:
         self.scheme, url = url.split("://", 1)
         assert self.scheme in ["http", "https", "file"]
 
+        # Handle file URLs
         if self.scheme == "file":
             self.host = ""
             self.path = url
             return
-
+        
+        # Handle default ports
         if self.scheme == "http":
             self.port = 80
         else:
             self.port = 443
 
+        # Handle paths
         if "/" not in url:
             url = url + "/"
         self.host, url = url.split("/", 1)
         self.path = "/" + url
         
+        # Handle port numbers
         if ":" in self.host:
             self.host, port = self.host.split(":", 1)
             self.port = int(port)
@@ -107,10 +111,27 @@ class URL:
 
         
 def show(body):
-    # Print the body without HTML tags
+    # Print the body without HTML tags, handling HTML entities
     in_tag = False
+    entity = ""
+    in_entity = False
+    
     for c in body:
-        if c == "<":
+        if in_entity:
+            if c == ";":
+                # Convert and print the entity
+                if entity == "&lt":
+                    print("<", end="")
+                elif entity == "&gt":
+                    print(">", end="")
+                in_entity = False
+                entity = ""
+            else:
+                entity += c
+        elif c == "&":
+            in_entity = True
+            entity = "&"
+        elif c == "<":
             in_tag = True
         elif c == ">":
             in_tag = False
