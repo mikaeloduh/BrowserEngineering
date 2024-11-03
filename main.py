@@ -37,8 +37,17 @@ class URL:
         # happen over an already established TCP connection. The SSL/TLS 
         # protocol is built on top of TCP.
 
-        request = f"GET {self.path} HTTP/1.0\r\n"
-        request += f"Host: {self.host}\r\n"
+        # Create headers dictionary for easier management
+        headers = {
+            "Host": self.host,
+            "Connection": "close",
+            "User-Agent": "toy-browser/1.0",
+        }
+
+        # Build request with headers
+        request = f"GET {self.path} HTTP/1.1\r\n"  # Updated to HTTP/1.1
+        for header, value in headers.items():
+            request += f"{header}: {value}\r\n"
         request += "\r\n"
 
         # Send the request to the server, encoded as a byte string
