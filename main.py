@@ -1,6 +1,13 @@
 import socket
 import ssl
 import sys
+import logging
+
+# Configure logging to display messages on the console
+logging.basicConfig(level=logging.INFO)
+
+# Cache to store open sockets keyed by (scheme, host, port)
+sockets = {}
 
 class URL:
     def __init__(self, url):
@@ -24,6 +31,7 @@ class URL:
         self.data = url[len("data:"):]  # Everything after "data:"
         self.host = ""
         self.path = ""
+        self.port = None
 
     def _parse_file_url(self, url):
         self.scheme = "file"
@@ -75,34 +83,40 @@ class URL:
         return content
 
     def _handle_network_request(self):
-        s = socket.socket(
-            family=socket.AF_INET,  # Use IPv4
-            type=socket.SOCK_STREAM,  # Use stream sockets
-            proto=socket.IPPROTO_TCP,  # Use TCP protocol for the socket
-        )
-        address = (self.host, self.port)
+        global sockets  # Use the global sockets cache
+        address = (self.scheme, self.host, self.port)
+        s = sockets.get(address)
 
         try:
-            # First establish TCP connection
-            s.connect(address)
+            if s is None:
+                logging.info(f"Creating new socket to {self.host}:{self.port}")
+                s = socket.socket(
+                    family=socket.AF_INET,
+                    type=socket.SOCK_STREAM,
+                    proto=socket.IPPROTO_TCP,
+                )
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.connect((self.host, self.port))
 
-            # Then upgrade to SSL/TLS if needed
-            if self.scheme == "https":
-                ctx = ssl.create_default_context()
-                s = ctx.wrap_socket(s, server_hostname=self.host)
-            # This order is important because the SSL/TLS handshake needs to
-            # happen over an already established TCP connection. The SSL/TLS
-            # protocol is built on top of TCP.
+                # Upgrade to SSL/TLS if needed
+                if self.scheme == "https":
+                    ctx = ssl.create_default_context()
+                    s = ctx.wrap_socket(s, server_hostname=self.host)
+
+                # Save the socket in the cache
+                sockets[address] = s
+            else:
+                logging.info(f"Reusing existing socket to {self.host}:{self.port}")
 
             # Create headers dictionary for easier management
             headers = {
                 "Host": self.host,
-                "Connection": "close",
                 "User-Agent": "toy-browser/1.0",
+                "Connection": "keep-alive",  # Explicitly set keep-alive
             }
 
             # Build request with headers
-            request = f"GET {self.path} HTTP/1.1\r\n"  # Updated to HTTP/1.1
+            request = f"GET {self.path} HTTP/1.1\r\n"
             for header, value in headers.items():
                 request += f"{header}: {value}\r\n"
             request += "\r\n"
@@ -110,31 +124,43 @@ class URL:
             # Send the request to the server, encoded as a byte string
             s.send(request.encode("utf-8"))
 
-            # To read the server’s response, you could use the read function on sockets,
-            # which gives whatever bits of the response have already arrived. Then you
-            # write a loop to collect those bits as they arrive. However, in Python you
-            # can use the makefile helper function, which hides the loop
-            response = s.makefile("r", encoding="utf-8", newline="\r\n")
-            status_line = response.readline()
+            # Read the server's response
+            response = s.makefile("rb")
+            status_line = response.readline().decode("utf-8")
             version, status, explanation = status_line.strip().split(" ", 2)
 
             # Read the response headers
             response_headers = {}
             while True:
                 line = response.readline()
-                # If the line is empty, we've reached the end of the headers
-                if line == "\r\n":
+                if line == b"\r\n":
                     break
-                header, value = line.strip().split(":", 1)
+                header_line = line.decode("utf-8").strip()
+                header, value = header_line.split(":", 1)
                 response_headers[header.casefold()] = value.strip()
 
-                assert "transfer-encoding" not in response_headers
-                assert "content-encoding" not in response_headers
+            # Ensure no unsupported transfer encodings are used
+            assert "transfer-encoding" not in response_headers
+            assert "content-encoding" not in response_headers
 
-            # Read the response body
-            content = response.read()
-        finally:
+            # Read the response body based on Content-Length
+            content_length = int(response_headers.get("content-length", 0))
+            content = response.read(content_length).decode("utf-8")
+
+        except (socket.error, ssl.SSLError) as e:
+            # Remove the socket from the cache on error
+            if address in sockets:
+                del sockets[address]
             s.close()
+            raise e
+        except Exception as e:
+            # On any other exception, ensure the socket is closed
+            if address in sockets:
+                del sockets[address]
+            s.close()
+            raise e
+
+        # Do not close the socket here to keep it alive
         return content
 
     def render(self, content):
@@ -179,7 +205,15 @@ def main():
     # Default to opening the test.html file in the same directory
     default_url = "file://test.html"
     url_str = sys.argv[1] if len(sys.argv) > 1 else default_url
-    load(URL(url_str))
+    url = URL(url_str)
+
+    # Make the first request
+    logging.info("Making the first request")
+    load(url)
+
+    # Make the second request to the same URL
+    logging.info("\nMaking the second request to the same URL")
+    load(url)
 
 if __name__ == "__main__":
     main()
