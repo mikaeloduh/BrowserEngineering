@@ -160,7 +160,6 @@ class URL:
 
 
 WIDTH, HEIGHT = 800, 600
-HSTEP, VSTEP = 13, 18
 SCROLL_STEP = 100
 
 
@@ -205,6 +204,12 @@ class Browser:
         self.canvas.delete("all")
 
         for x, y, c in self.display_list:
+            if y > self.scroll + HEIGHT:
+                # skips characters below the viewing window
+                continue
+            if y + VSTEP < self.scroll:
+                # skips characters above the viewing window
+                continue
             self.canvas.create_text(x, y - self.scroll, text=c)
 
     def scroll_up(self, event):
@@ -215,6 +220,7 @@ class Browser:
         self.scroll += SCROLL_STEP
         self.draw()
 
+HSTEP, VSTEP = 13, 18
 
 def layout(text):
     display_list = []
