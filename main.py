@@ -4,13 +4,12 @@ import sys
 import logging
 import tkinter
 
-WIDTH, HEIGHT = 800, 600
-
 # Configure logging to display messages on the console
 logging.basicConfig(level=logging.INFO)
 
 # Cache to store open sockets keyed by (scheme, host, port)
 sockets = {}
+
 
 class URL:
     def __init__(self, url):
@@ -197,6 +196,12 @@ class URL:
                 result.append(c)
         return ''.join(result)
 
+
+WIDTH, HEIGHT = 800, 600
+HSTEP, VSTEP = 13, 18
+SCROLL_STEP = 100
+
+
 class Browser:
     def __init__(self):
         self.window = tkinter.Tk()
@@ -207,21 +212,43 @@ class Browser:
         )
         self.canvas.pack()
 
+        # Scroll position
+        self.scroll = 0
+
+        self.window.bind("<Up>", self.scroll_up)
+        self.window.bind("<Down>", self.scroll_down)
+
     def load(self, url):
         body = url.request()
-        self.show(body)
+        self.display_list = layout(body)
+        self.draw()
 
-    def show(self, body):
-        print(body, end="")
-                
-        HSTEP, VSTEP = 13, 18
-        cursor_x, cursor_y = HSTEP, VSTEP
-        for c in body:
-            if cursor_x >= WIDTH - HSTEP:
-                cursor_y += VSTEP
-                cursor_x = HSTEP
-            self.canvas.create_text(cursor_x, cursor_y, text=c)
-            cursor_x += HSTEP
+    def draw(self):
+        self.canvas.delete("all")
+
+        for x, y, c in self.display_list:
+            self.canvas.create_text(x, y - self.scroll, text=c)
+
+    def scroll_up(self, event):
+        self.scroll -= SCROLL_STEP
+        self.draw()
+
+    def scroll_down(self, event):
+        self.scroll += SCROLL_STEP
+        self.draw()
+
+
+def layout(text):
+    display_list = []
+    cursor_x, cursor_y = HSTEP, VSTEP
+    for c in text:
+        if cursor_x >= WIDTH - HSTEP:
+            cursor_y += VSTEP
+            cursor_x = HSTEP
+        display_list.append((cursor_x, cursor_y, c))
+        cursor_x += HSTEP
+    
+    return display_list
 
 
 if __name__ == "__main__":
