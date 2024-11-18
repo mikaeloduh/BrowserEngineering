@@ -192,7 +192,7 @@ class Browser:
         # Otherwise, draw for normal rendering
         if view_source:
             # Display the raw content without rendering
-            self.display_list = self.format_content(content)
+            self.display_list = layout(content)
         else:
             # Render the content before displaying
             rendered_content = render(content)
@@ -226,12 +226,16 @@ def layout(text):
     display_list = []
     cursor_x, cursor_y = HSTEP, VSTEP
     for c in text:
-        if cursor_x >= WIDTH - HSTEP:
+        if c == '\n':
+            # For paragraph breaks, increase cursor_y by more than VSTEP
             cursor_y += VSTEP
             cursor_x = HSTEP
-        display_list.append((cursor_x, cursor_y, c))
-        cursor_x += HSTEP
-    
+        else:
+            if cursor_x >= WIDTH - HSTEP:
+                cursor_y += VSTEP
+                cursor_x = HSTEP
+            display_list.append((cursor_x, cursor_y, c))
+            cursor_x += HSTEP
     return display_list
 
 def render(content):
