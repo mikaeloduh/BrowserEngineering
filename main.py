@@ -13,12 +13,6 @@ sockets = {}
 
 class URL:
     def __init__(self, url):
-        # Handle view-source scheme
-        self.view_source = url.startswith("view-source:")
-        if self.view_source:
-            url = url[len("view-source:"):]  # Remove "view-source:" prefix
-
-        # Handle data URLs which use single colon instead of ://
         if url.startswith("data:"):
             self._parse_data_url(url)
         elif url.startswith("file://"):
@@ -70,9 +64,7 @@ class URL:
         else:
             content = self._handle_network_request()
 
-        # If view-source is enabled, return the raw content
-        # Otherwise, return for normal rendering
-        return content if self.view_source else self.render(content)
+        return content
 
     def _handle_file_request(self):
         try:
@@ -165,36 +157,6 @@ class URL:
         # Do not close the socket here to keep it alive
         return content
 
-    def render(self, content):
-        # Move HTML parsing logic here
-        result = []
-        in_tag = False
-        entity = ""
-        in_entity = False
-
-        for c in content:
-            if in_entity:
-                if c == ";":
-                    if entity == "lt":
-                        result.append("<")
-                    elif entity == "gt":
-                        result.append(">")
-                    else:
-                        result.append(f"&{entity};")
-                    in_entity = False
-                    entity = ""
-                else:
-                    entity += c
-            elif c == "&":
-                in_entity = True
-                entity = ""
-            elif c == "<":
-                in_tag = True
-            elif c == ">":
-                in_tag = False
-            elif not in_tag:
-                result.append(c)
-        return ''.join(result)
 
 
 WIDTH, HEIGHT = 800, 600
@@ -218,9 +180,25 @@ class Browser:
         self.window.bind("<Up>", self.scroll_up)
         self.window.bind("<Down>", self.scroll_down)
 
-    def load(self, url):
-        body = url.request()
-        self.display_list = layout(body)
+    def load(self, url_str):
+        # Check for 'view-source:' prefix
+        view_source = url_str.startswith("view-source:")
+        if view_source:
+            url_str = url_str[len("view-source:"):]  # Remove 'view-source:' prefix
+
+        url = URL(url_str)
+        content = url.request()
+
+        # If view-source is enabled, draw the raw content
+        # Otherwise, draw for normal rendering
+        if view_source:
+            # Display the raw content without rendering
+            self.display_list = self.format_content(content)
+        else:
+            # Render the content before displaying
+            rendered_content = render(content)
+            self.display_list = layout(rendered_content)
+
         self.draw()
 
     def draw(self):
@@ -250,12 +228,41 @@ def layout(text):
     
     return display_list
 
+def render(content):
+    # Move HTML parsing logic here
+    result = []
+    in_tag = False
+    entity = ""
+    in_entity = False
+
+    for c in content:
+        if in_entity:
+            if c == ";":
+                if entity == "lt":
+                    result.append("<")
+                elif entity == "gt":
+                    result.append(">")
+                else:
+                    result.append(f"&{entity};")
+                in_entity = False
+                entity = ""
+            else:
+                entity += c
+        elif c == "&":
+            in_entity = True
+            entity = ""
+        elif c == "<":
+            in_tag = True
+        elif c == ">":
+            in_tag = False
+        elif not in_tag:
+            result.append(c)
+    return ''.join(result)
 
 if __name__ == "__main__":
     # Default to opening the test.html file in the same directory
     default_url = "file://test.html"
     url_str = sys.argv[1] if len(sys.argv) > 1 else default_url
-    url = URL(url_str)
 
-    Browser().load(url)
+    Browser().load(url_str)
     tkinter.mainloop()
