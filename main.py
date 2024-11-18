@@ -2,6 +2,9 @@ import socket
 import ssl
 import sys
 import logging
+import tkinter
+
+WIDTH, HEIGHT = 800, 600
 
 # Configure logging to display messages on the console
 logging.basicConfig(level=logging.INFO)
@@ -194,26 +197,38 @@ class URL:
                 result.append(c)
         return ''.join(result)
 
-def show(body):
-    print(body, end="")
+class Browser:
+    def __init__(self):
+        self.window = tkinter.Tk()
+        self.canvas = tkinter.Canvas(
+            self.window, 
+            width=WIDTH,
+            height=HEIGHT
+        )
+        self.canvas.pack()
 
-def load(url):
-    body = url.request()
-    show(body)
+    def load(self, url):
+        body = url.request()
+        self.show(body)
 
-def main():
+    def show(self, body):
+        print(body, end="")
+                
+        HSTEP, VSTEP = 13, 18
+        cursor_x, cursor_y = HSTEP, VSTEP
+        for c in body:
+            if cursor_x >= WIDTH - HSTEP:
+                cursor_y += VSTEP
+                cursor_x = HSTEP
+            self.canvas.create_text(cursor_x, cursor_y, text=c)
+            cursor_x += HSTEP
+
+
+if __name__ == "__main__":
     # Default to opening the test.html file in the same directory
     default_url = "file://test.html"
     url_str = sys.argv[1] if len(sys.argv) > 1 else default_url
     url = URL(url_str)
 
-    # Make the first request
-    logging.info("Making the first request")
-    load(url)
-
-    # Make the second request to the same URL
-    logging.info("\nMaking the second request to the same URL")
-    load(url)
-
-if __name__ == "__main__":
-    main()
+    Browser().load(url)
+    tkinter.mainloop()
