@@ -213,11 +213,16 @@ class Browser:
             self.canvas.create_text(x, y - self.scroll, text=c)
 
     def scroll_up(self, event):
-        self.scroll -= SCROLL_STEP
+        self.scroll = max(0, self.scroll - SCROLL_STEP)
         self.draw()
 
     def scroll_down(self, event):
-        self.scroll += SCROLL_STEP
+        # Find the maximum y-coordinate in the display_list
+        max_y = max(y for x, y, c in self.display_list)
+        # Add a step to account for character height
+        content_height = max_y + VSTEP
+        max_scroll = max(0, content_height - HEIGHT)
+        self.scroll = min(self.scroll + SCROLL_STEP, max_scroll)
         self.draw()
 
 HSTEP, VSTEP = 13, 18
